@@ -23,9 +23,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.lctracker.data.DataStoreManager
-import com.example.lctracker.ui.dashboard.LeetcodeDashboard
 import kotlinx.coroutines.launch
 
+// Hardcoded for now; could move to a separate file later
 enum class Difficulty {
     EASY, MEDIUM, HARD
 }
@@ -40,96 +40,108 @@ data class Problem(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LcTrackerApp() {
-    val context = LocalContext.current
-    val dataStoreManager = remember { DataStoreManager(context) }
+    val ctx = LocalContext.current
+    val ds = remember { DataStoreManager(ctx) }
     val scope = rememberCoroutineScope()
 
-    var problems by remember { mutableStateOf(listOf<Problem>()) }
-    var showDialog by remember { mutableStateOf(false) }
-    var newProblemTitle by remember { mutableStateOf("") }
-    var newProblemDifficulty by remember { mutableStateOf(Difficulty.EASY) }
-    var selectedDifficulty by remember { mutableStateOf<Difficulty?>(null) }
+    var problemList by remember { mutableStateOf(listOf<Problem>()) }
+    var showAddDialog by remember { mutableStateOf(false) }
+    var inputTitle by remember { mutableStateOf("") }
+    var diffLevel by remember { mutableStateOf(Difficulty.EASY) }
+    var filterLevel by remember { mutableStateOf<Difficulty?>(null) }
 
+    // Load data initially
     LaunchedEffect(Unit) {
         try {
-            dataStoreManager.problemsFlow.collect {
-                problems = it
+            ds.problemsFlow.collect {
+                problemList = it
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            e.printStackTrace() // TODO: Better error handling
         }
     }
 
-    val filteredProblems = selectedDifficulty?.let {
-        problems.filter { p -> p.difficulty == it }
-    } ?: problems
+    val displayList = filterLevel?.let {
+        problemList.filter { prob -> prob.difficulty == it }
+    } ?: problemList
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { showDialog = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Add Problem")
+            FloatingActionButton(onClick = { showAddDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = "Add")
             }
         }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-        ) {
-            Text("LeetCode Tracker", fontSize = 24.sp)
-            Spacer(modifier = Modifier.height(8.dp))
+    ) { innerPad ->
+        Column(modifier = Modifier.padding(innerPad).padding(16.dp)) {
+            Text("LeetCode Tracker", fontSize = 22.sp)
+            Spacer(Modifier.height(10.dp))
 
-            if (problems.isNotEmpty()) {
-                AnimatedLeetcodeDashboard(problems)
-                Spacer(modifier = Modifier.height(16.dp))
+            if (problemList.isNotEmpty()) {
+                ProblemStatsPie(problemList)
+                Spacer(Modifier.height(12.dp))
 
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                    Difficulty.values().forEach { diff ->
+                    Difficulty.values().forEach { d ->
                         FilterChip(
-                            selected = selectedDifficulty?.name == diff.name,
+                            selected = filterLevel?.name == d.name,
                             onClick = {
-                                selectedDifficulty = if (selectedDifficulty == diff) null else diff
+                                filterLevel = if (filterLevel == d) null else d
                             },
-                            label = { Text(diff.name) }
+                            label = { Text(d.name) }
                         )
                     }
                 }
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
             }
 
             LazyColumn {
-                items(filteredProblems) { problem ->
-                    ProblemItem(problem) {
-                        problems = problems.map {
-                            if (it.title == problem.title)
-                                it.copy(isSolved = !it.isSolved)
-                            else it
-                        }
-                        scope.launch {
-                            dataStoreManager.saveProblems(problems)
+                items(displayList) { item ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                problemList = problemList.map {
+                                    if (it.title == item.title) it.copy(isSolved = !it.isSolved) else it
+                                }
+                                scope.launch {
+                                    ds.saveProblems(problemList)
+                                }
+                            },
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (item.isSolved) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surface
+                        )
+                    ) {
+                        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(item.title, modifier = Modifier.weight(1f))
+                            Text(
+                                if (item.isSolved) "Done" else "Pending",
+                                color = if (item.isSolved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                            )
                         }
                     }
                 }
             }
 
-            if (showDialog) {
+            if (showAddDialog) {
                 AlertDialog(
                     onDismissRequest = {
-                        showDialog = false
-                        newProblemTitle = ""
-                        newProblemDifficulty = Difficulty.EASY
+                        showAddDialog = false
+                        inputTitle = ""
+                        diffLevel = Difficulty.EASY
                     },
                     confirmButton = {
                         TextButton(onClick = {
-                            if (newProblemTitle.isNotBlank()) {
-                                val updated = problems + Problem(newProblemTitle, false, newProblemDifficulty)
-                                problems = updated
+                            if (inputTitle.isNotBlank()) {
+                                val upd = problemList + Problem(inputTitle.trim(), false, diffLevel)
+                                problemList = upd
                                 scope.launch {
-                                    dataStoreManager.saveProblems(updated)
+                                    ds.saveProblems(upd)
                                 }
-                                newProblemTitle = ""
-                                newProblemDifficulty = Difficulty.EASY
-                                showDialog = false
+                                inputTitle = ""
+                                diffLevel = Difficulty.EASY
+                                showAddDialog = false
                             }
                         }) {
                             Text("Add")
@@ -137,37 +149,37 @@ fun LcTrackerApp() {
                     },
                     dismissButton = {
                         TextButton(onClick = {
-                            showDialog = false
-                            newProblemTitle = ""
-                            newProblemDifficulty = Difficulty.EASY
+                            showAddDialog = false
+                            inputTitle = ""
+                            diffLevel = Difficulty.EASY
                         }) {
                             Text("Cancel")
                         }
                     },
-                    title = { Text("Add New Problem") },
+                    title = { Text("New Problem") },
                     text = {
                         Column {
                             OutlinedTextField(
-                                value = newProblemTitle,
-                                onValueChange = { newProblemTitle = it },
-                                label = { Text("Problem title") },
+                                value = inputTitle,
+                                onValueChange = { inputTitle = it },
+                                label = { Text("Title") },
                                 singleLine = true
                             )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text("Select Difficulty:")
-                            Difficulty.values().forEach { difficulty ->
+                            Spacer(Modifier.height(6.dp))
+                            Text("Difficulty:")
+                            Difficulty.values().forEach { d ->
                                 Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier
+                                    Modifier
                                         .fillMaxWidth()
-                                        .clickable { newProblemDifficulty = difficulty }
-                                        .padding(vertical = 4.dp)
+                                        .clickable { diffLevel = d }
+                                        .padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     RadioButton(
-                                        selected = newProblemDifficulty == difficulty,
-                                        onClick = { newProblemDifficulty = difficulty }
+                                        selected = diffLevel == d,
+                                        onClick = { diffLevel = d }
                                     )
-                                    Text(difficulty.name)
+                                    Text(d.name)
                                 }
                             }
                         }
@@ -179,88 +191,52 @@ fun LcTrackerApp() {
 }
 
 @Composable
-fun ProblemItem(problem: Problem, onToggle: () -> Unit) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clickable { onToggle() },
-        colors = CardDefaults.cardColors(
-            containerColor = if (problem.isSolved)
-                MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = problem.title,
-                modifier = Modifier.weight(1f),
-                style = MaterialTheme.typography.bodyLarge
-            )
-            Text(
-                text = if (problem.isSolved) "Solved" else "Pending",
-                color = if (problem.isSolved)
-                    MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.error
-            )
-        }
-    }
-}
+fun ProblemStatsPie(probs: List<Problem>) {
+    val total = probs.size.coerceAtLeast(1) // avoid div by zero
+    val easyCt = probs.count { it.difficulty == Difficulty.EASY && it.isSolved }
+    val medCt = probs.count { it.difficulty == Difficulty.MEDIUM && it.isSolved }
+    val hardCt = probs.count { it.difficulty == Difficulty.HARD && it.isSolved }
+    val solved = probs.count { it.isSolved }
+    val remain = probs.count { !it.isSolved }
 
-@Composable
-fun AnimatedLeetcodeDashboard(problems: List<Problem>) {
-    val total = problems.size.coerceAtLeast(1)
-    val easySolved = problems.count { it.difficulty == Difficulty.EASY && it.isSolved }
-    val mediumSolved = problems.count { it.difficulty == Difficulty.MEDIUM && it.isSolved }
-    val hardSolved = problems.count { it.difficulty == Difficulty.HARD && it.isSolved }
-    val solved = problems.count { it.isSolved }
-    val attempting = problems.count { !it.isSolved }
+    val angleEasy by animateFloatAsState((easyCt / total.toFloat()) * 360f, label = "easy")
+    val angleMed by animateFloatAsState((medCt / total.toFloat()) * 360f, label = "med")
+    val angleHard by animateFloatAsState((hardCt / total.toFloat()) * 360f, label = "hard")
 
-    val easyAngle by animateFloatAsState((easySolved / total.toFloat()) * 360f, label = "easyAngle")
-    val mediumAngle by animateFloatAsState((mediumSolved / total.toFloat()) * 360f, label = "mediumAngle")
-    val hardAngle by animateFloatAsState((hardSolved / total.toFloat()) * 360f, label = "hardAngle")
-
-    val ringColors = listOf(
-        Color(0xFF16C3B0), // Easy - teal
-        Color(0xFFFFB300), // Medium - yellow
-        Color(0xFFEF5350)  // Hard - red
-    )
+    val colors = listOf(Color(0xFF4DB6AC), Color(0xFFFFCA28), Color(0xFFE57373))
 
     Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(160.dp)) {
             val stroke = 20f
-            val arcSize = Size(this.size.width - stroke, this.size.height - stroke)
-            var startAngle = -90f
+            val arcSize = Size(size.width - stroke, size.height - stroke)
+            var start = -90f
 
             drawArc(
-                color = ringColors[0],
-                startAngle = startAngle,
-                sweepAngle = easyAngle,
+                color = colors[0],
+                startAngle = start,
+                sweepAngle = angleEasy,
                 useCenter = false,
                 style = Stroke(width = stroke, cap = StrokeCap.Round),
                 topLeft = Offset(stroke / 2, stroke / 2),
                 size = arcSize
             )
-            startAngle += easyAngle
+            start += angleEasy
 
             drawArc(
-                color = ringColors[1],
-                startAngle = startAngle,
-                sweepAngle = mediumAngle,
+                color = colors[1],
+                startAngle = start,
+                sweepAngle = angleMed,
                 useCenter = false,
                 style = Stroke(width = stroke, cap = StrokeCap.Round),
                 topLeft = Offset(stroke / 2, stroke / 2),
                 size = arcSize
             )
-            startAngle += mediumAngle
+            start += angleMed
 
             drawArc(
-                color = ringColors[2],
-                startAngle = startAngle,
-                sweepAngle = hardAngle,
+                color = colors[2],
+                startAngle = start,
+                sweepAngle = angleHard,
                 useCenter = false,
                 style = Stroke(width = stroke, cap = StrokeCap.Round),
                 topLeft = Offset(stroke / 2, stroke / 2),
@@ -269,9 +245,9 @@ fun AnimatedLeetcodeDashboard(problems: List<Problem>) {
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("$solved/${problems.size}", style = MaterialTheme.typography.titleLarge)
+            Text("$solved/${probs.size}", style = MaterialTheme.typography.titleLarge)
             Text("Solved", style = MaterialTheme.typography.labelMedium)
-            Text("$attempting Attempting", style = MaterialTheme.typography.bodySmall)
+            Text("$remain To Go", style = MaterialTheme.typography.bodySmall)
         }
     }
 }
